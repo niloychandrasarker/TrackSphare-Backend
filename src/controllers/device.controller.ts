@@ -294,3 +294,60 @@ export async function deleteDevice(req: AuthenticatedRequest, res: Response): Pr
     res.status(500).json({ success: false, error: 'Failed to revoke device' });
   }
 }
+
+export async function updateDevice(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const rawDevId = req.params.id as string;
+    const computedUuid = toValidUuid(rawDevId);
+    const { name, model, userName, imageUrl, sharingEnabled, status } = req.body;
+
+    // Check if device exists by UUID or matching name/model
+    const dev = await query<{ id: string; user_id: string }>(
+      `SELECT id, user_id FROM devices 
+       WHERE id = $1 OR name ILIKE $2 OR model ILIKE $2 
+       LIMIT 1`,
+      [computedUuid, rawDevId]
+    );
+
+    const deviceId = dev.rows[0]?.id || computedUuid;
+
+    if (req.user && !['super_admin', 'org_admin'].includes(req.user.role)) {
+      if (dev.rows[0] && dev.rows[0].user_id !== req.user.sub) {
+        res.status(403).json({ success: false, error: 'Unauthorized to update this device' });
+        return;
+      }
+    }
+
+    const result = await query(
+      `UPDATE devices
+       SET name = COALESCE($1, name),
+           model = COALESCE($2, model),
+           user_name = COALESCE($3, user_name),
+           image_url = COALESCE($4, image_url),
+           sharing_enabled = COALESCE($5, sharing_enabled),
+           status = COALESCE($6, status),
+           updated_at = NOW()
+       WHERE id = $7
+       RETURNING id, name, model, user_name, image_url, sharing_enabled, status, last_seen_at, battery_level`,
+      [
+        name ?? null,
+        model ?? null,
+        userName ?? null,
+        imageUrl ?? null,
+        sharingEnabled !== undefined ? sharingEnabled : null,
+        status ?? null,
+        deviceId,
+      ]
+    );
+
+    if (!result.rows[0]) {
+      res.status(404).json({ success: false, error: 'Device not found' });
+      return;
+    }
+
+    res.json({ success: true, data: result.rows[0] });
+  } catch (err: any) {
+    console.error('Update device error:', err);
+    res.status(500).json({ success: false, error: 'Failed to update device' });
+  }
+}

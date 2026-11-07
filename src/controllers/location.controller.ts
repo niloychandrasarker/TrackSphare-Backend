@@ -59,6 +59,10 @@ export async function uploadLocation(req: AuthenticatedRequest, res: Response): 
       recordedAt = new Date().toISOString();
     }
 
+    const rawDevName = req.body?.name || req.query?.name;
+    const rawUserName = req.body?.userName || req.body?.user_name || req.query?.userName || req.query?.user_name;
+    const rawImageUrl = req.body?.imageUrl || req.body?.image_url || req.query?.imageUrl || req.query?.image_url;
+
     // Check if device exists by UUID or matching name/model
     const dev = await query<{ id: string; user_id: string; sharing_enabled: boolean; status: string; name: string }>(
       `SELECT id, user_id, sharing_enabled, status, name 
@@ -76,16 +80,23 @@ export async function uploadLocation(req: AuthenticatedRequest, res: Response): 
       const adminRes = await query<{ id: string }>('SELECT id FROM users WHERE role = $1 ORDER BY created_at ASC LIMIT 1', ['super_admin']);
       targetUserId = targetUserId || adminRes.rows[0]?.id;
 
-      // Auto-register device with the raw ID in name
+      const devName = rawDevName ? String(rawDevName) : `Device (${rawDevId})`;
+      const uName = rawUserName ? String(rawUserName) : `Device ${rawDevId}`;
+      const imgUrl = rawImageUrl ? String(rawImageUrl) : null;
+
+      // Auto-register device with the raw ID or provided custom name in DB
       await query(
-        `INSERT INTO devices (id, user_id, name, model, user_name, status, sharing_enabled, last_seen_at, battery_level)
-         VALUES ($1, $2, $3, 'Android GPS Client', $4, 'active', TRUE, NOW(), $5)
+        `INSERT INTO devices (id, user_id, name, model, user_name, image_url, status, sharing_enabled, last_seen_at, battery_level)
+         VALUES ($1, $2, $3, 'Android GPS Client', $4, $5, 'active', TRUE, NOW(), $6)
          ON CONFLICT (id) DO UPDATE SET 
             status = 'active', 
             sharing_enabled = TRUE, 
             last_seen_at = NOW(), 
-            battery_level = COALESCE($5, devices.battery_level)`,
-        [deviceId, targetUserId, `Device (${rawDevId})`, `Device ${rawDevId}`, batteryLevel]
+            battery_level = COALESCE($6, devices.battery_level),
+            name = COALESCE($3, devices.name),
+            user_name = COALESCE($4, devices.user_name),
+            image_url = COALESCE($5, devices.image_url)`,
+        [deviceId, targetUserId, devName, uName, imgUrl, batteryLevel]
       );
     } else {
       deviceId = dev.rows[0].id;
@@ -98,9 +109,12 @@ export async function uploadLocation(req: AuthenticatedRequest, res: Response): 
       await query(
         `UPDATE devices 
          SET status = 'active', sharing_enabled = TRUE, last_seen_at = NOW(), 
-             battery_level = COALESCE($2, battery_level) 
+             battery_level = COALESCE($2, battery_level),
+             name = COALESCE($3, name),
+             user_name = COALESCE($4, user_name),
+             image_url = COALESCE($5, image_url)
          WHERE id = $1`,
-        [deviceId, batteryLevel]
+        [deviceId, batteryLevel, rawDevName || null, rawUserName || null, rawImageUrl || null]
       );
     }
 
