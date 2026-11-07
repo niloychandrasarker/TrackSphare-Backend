@@ -99,9 +99,9 @@ export async function registerMobileDevice(req: AuthenticatedRequest, res: Respo
 
     let result;
     if (deviceId) {
-      result = await query<{ id: string; name: string; model: string; sharing_enabled: boolean; status: string; image_url: string }>(
-        `INSERT INTO devices (id, user_id, name, model, android_version, app_version, status, sharing_enabled, last_seen_at, battery_level, image_url)
-         VALUES ($1, $2, $3, $4, $5, $6, 'active', TRUE, NOW(), $7, $8)
+      result = await query<{ id: string; name: string; model: string; sharing_enabled: boolean; status: string; image_url: string; user_name: string }>(
+        `INSERT INTO devices (id, user_id, name, model, android_version, app_version, status, sharing_enabled, last_seen_at, battery_level, image_url, user_name)
+         VALUES ($1, $2, $3, $4, $5, $6, 'active', TRUE, NOW(), $7, $8, $9)
          ON CONFLICT (id) DO UPDATE
          SET name = EXCLUDED.name,
              model = EXCLUDED.model,
@@ -109,27 +109,28 @@ export async function registerMobileDevice(req: AuthenticatedRequest, res: Respo
              sharing_enabled = TRUE,
              last_seen_at = NOW(),
              battery_level = COALESCE(EXCLUDED.battery_level, devices.battery_level),
-             image_url = COALESCE(EXCLUDED.image_url, devices.image_url)
-         RETURNING id, name, model, sharing_enabled, status, image_url`,
-        [deviceId, targetUserId, devName, devModel, androidVersion || null, appVersion || null, batteryLevel || null, imageUrl || null]
+             image_url = COALESCE(EXCLUDED.image_url, devices.image_url),
+             user_name = COALESCE(EXCLUDED.user_name, devices.user_name)
+         RETURNING id, name, model, sharing_enabled, status, image_url, user_name`,
+        [deviceId, targetUserId, devName, devModel, androidVersion || null, appVersion || null, batteryLevel || null, imageUrl || null, userName || null]
       );
     } else {
-      result = await query<{ id: string; name: string; model: string; sharing_enabled: boolean; status: string; image_url: string }>(
-        `INSERT INTO devices (user_id, name, model, android_version, app_version, status, sharing_enabled, last_seen_at, battery_level, image_url)
-         VALUES ($1, $2, $3, $4, $5, 'active', TRUE, NOW(), $6, $7)
-         RETURNING id, name, model, sharing_enabled, status, image_url`,
-        [targetUserId, devName, devModel, androidVersion || null, appVersion || null, batteryLevel || null, imageUrl || null]
+      result = await query<{ id: string; name: string; model: string; sharing_enabled: boolean; status: string; image_url: string; user_name: string }>(
+        `INSERT INTO devices (user_id, name, model, android_version, app_version, status, sharing_enabled, last_seen_at, battery_level, image_url, user_name)
+         VALUES ($1, $2, $3, $4, $5, 'active', TRUE, NOW(), $6, $7, $8)
+         RETURNING id, name, model, sharing_enabled, status, image_url, user_name`,
+        [targetUserId, devName, devModel, androidVersion || null, appVersion || null, batteryLevel || null, imageUrl || null, userName || null]
       );
     }
 
-    // Update user name and avatar if provided
-    if (userName || imageUrl) {
+    // Update user profile only if the user explicitly logged in
+    if (req.user?.sub && (userName || imageUrl)) {
       await query(
         `UPDATE users 
          SET name = COALESCE($1, name),
              avatar_url = COALESCE($2, avatar_url)
          WHERE id = $3`,
-        [userName || null, imageUrl || null, targetUserId]
+        [userName || null, imageUrl || null, req.user.sub]
       ).catch(() => {});
     }
 

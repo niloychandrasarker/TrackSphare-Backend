@@ -186,7 +186,7 @@ export async function getLiveLocations(req: AuthenticatedRequest, res: Response)
     const placeholders = deviceIds.map((_, i) => `$${i + 1}`).join(',');
     const locationsResult = await query(
       `SELECT DISTINCT ON (l.device_id)
-         l.device_id, d.name AS device_name, u.name AS user_name,
+         l.device_id, d.name AS device_name, COALESCE(d.user_name, u.name) AS user_name,
          l.latitude, l.longitude, l.accuracy, d.battery_level,
          l.recorded_at, l.received_at, d.image_url, u.avatar_url
        FROM locations l
