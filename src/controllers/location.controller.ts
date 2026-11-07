@@ -254,29 +254,38 @@ export async function getLocationHistory(req: AuthenticatedRequest, res: Respons
       return;
     }
 
+    const computedUuid = toValidUuid(String(deviceId));
+    const devRes = await query<{ id: string }>(
+      `SELECT id FROM devices WHERE id = $1 OR name ILIKE $2 OR model ILIKE $2 LIMIT 1`,
+      [computedUuid, String(deviceId)]
+    );
+    const validDeviceId = devRes.rows[0]?.id || computedUuid;
+
     const conditions: string[] = ['device_id = $1'];
-    const params: unknown[] = [deviceId];
+    const params: unknown[] = [validDeviceId];
     let idx = 2;
 
     if (from) { conditions.push(`recorded_at >= $${idx++}`); params.push(from); }
     if (to) { conditions.push(`recorded_at <= $${idx++}`); params.push(to); }
 
-    params.push(parseInt(limit as string, 10), parseInt(offset as string, 10));
+    const whereClause = conditions.join(' AND ');
 
-    const [rows, count] = await Promise.all([
-      query(
-        `SELECT id, latitude, longitude, accuracy, recorded_at, received_at
-         FROM locations
-         WHERE ${conditions.join(' AND ')}
-         ORDER BY recorded_at DESC
-         LIMIT $${idx++} OFFSET $${idx}`,
-        params
-      ),
-      query<{ count: string }>(
-        `SELECT COUNT(*) AS count FROM locations WHERE ${conditions.join(' AND ')}`,
-        params.slice(0, params.length - 2)
-      ),
-    ]);
+    const countPromise = query<{ count: string }>(
+      `SELECT COUNT(*) AS count FROM locations WHERE ${whereClause}`,
+      [...params]
+    );
+
+    const dataParams = [...params, parseInt(limit as string, 10), parseInt(offset as string, 10)];
+    const dataPromise = query(
+      `SELECT id, latitude, longitude, accuracy, recorded_at, received_at
+       FROM locations
+       WHERE ${whereClause}
+       ORDER BY recorded_at DESC
+       LIMIT $${idx++} OFFSET $${idx}`,
+      dataParams
+    );
+
+    const [count, rows] = await Promise.all([countPromise, dataPromise]);
 
     res.json({
       success: true,
@@ -290,6 +299,7 @@ export async function getLocationHistory(req: AuthenticatedRequest, res: Respons
       },
     });
   } catch (err: any) {
+    console.error('Failed to fetch history:', err);
     res.status(500).json({ success: false, error: 'Failed to fetch history' });
   }
 }
