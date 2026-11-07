@@ -2,11 +2,26 @@ import { Response } from 'express';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware.js';
 import { query } from '../config/db.js';
 import { writeAuditLog } from '../utils/audit.js';
+import crypto from 'crypto';
+
+export function toValidUuid(rawId?: string | null): string {
+  if (!rawId || typeof rawId !== 'string') {
+    return '9f2f6062-af23-48fa-abc3-cb2c42f9ec96';
+  }
+  const trimmed = rawId.trim();
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (uuidRegex.test(trimmed)) {
+    return trimmed.toLowerCase();
+  }
+  // Deterministic UUID from raw ID string
+  const hash = crypto.createHash('md5').update('tracksphere-dev-' + trimmed).digest('hex');
+  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
+}
 
 export async function uploadLocation(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
-    const rawDevId = req.body?.deviceId || req.query?.id || req.query?.deviceId || req.headers['x-device-id'];
-    const deviceId = String(rawDevId || '9f2f6062-af23-48fa-abc3-cb2c42f9ec96');
+    const rawDevId = req.body?.deviceId || req.body?.id || req.query?.id || req.query?.deviceId || req.headers['x-device-id'] || '377204';
+    const computedUuid = toValidUuid(String(rawDevId));
 
     const rawLat = req.body?.latitude ?? req.query?.lat ?? req.query?.latitude;
     const rawLng = req.body?.longitude ?? req.query?.lon ?? req.query?.lng ?? req.query?.longitude;
@@ -44,12 +59,16 @@ export async function uploadLocation(req: AuthenticatedRequest, res: Response): 
       recordedAt = new Date().toISOString();
     }
 
-    // Check if device exists
-    const dev = await query<{ id: string; user_id: string; sharing_enabled: boolean; status: string }>(
-      'SELECT id, user_id, sharing_enabled, status FROM devices WHERE id = $1',
-      [deviceId]
+    // Check if device exists by UUID or matching name/model
+    const dev = await query<{ id: string; user_id: string; sharing_enabled: boolean; status: string; name: string }>(
+      `SELECT id, user_id, sharing_enabled, status, name 
+       FROM devices 
+       WHERE id = $1 OR name ILIKE $2 OR model ILIKE $2 
+       LIMIT 1`,
+      [computedUuid, String(rawDevId)]
     );
 
+    let deviceId = dev.rows[0]?.id || computedUuid;
     let targetUserId = req.user?.sub;
 
     if (!dev.rows[0]) {
@@ -57,14 +76,19 @@ export async function uploadLocation(req: AuthenticatedRequest, res: Response): 
       const adminRes = await query<{ id: string }>('SELECT id FROM users WHERE role = $1 ORDER BY created_at ASC LIMIT 1', ['super_admin']);
       targetUserId = targetUserId || adminRes.rows[0]?.id;
 
-      // Auto-register device
+      // Auto-register device with the raw ID in name
       await query(
-        `INSERT INTO devices (id, user_id, name, model, status, sharing_enabled, last_seen_at, battery_level)
-         VALUES ($1, $2, 'Android Mobile Phone', 'honor', 'active', TRUE, NOW(), $3)
-         ON CONFLICT (id) DO UPDATE SET status = 'active', sharing_enabled = TRUE, last_seen_at = NOW(), battery_level = COALESCE($3, devices.battery_level)`,
-        [deviceId, targetUserId, batteryLevel]
+        `INSERT INTO devices (id, user_id, name, model, user_name, status, sharing_enabled, last_seen_at, battery_level)
+         VALUES ($1, $2, $3, 'Android GPS Client', $4, 'active', TRUE, NOW(), $5)
+         ON CONFLICT (id) DO UPDATE SET 
+            status = 'active', 
+            sharing_enabled = TRUE, 
+            last_seen_at = NOW(), 
+            battery_level = COALESCE($5, devices.battery_level)`,
+        [deviceId, targetUserId, `Device (${rawDevId})`, `Device ${rawDevId}`, batteryLevel]
       );
     } else {
+      deviceId = dev.rows[0].id;
       // If user is authenticated, ensure ownership unless admin
       if (req.user && !['super_admin', 'org_admin'].includes(req.user.role) && dev.rows[0].user_id !== req.user.sub) {
         res.status(403).json({ success: false, error: 'You do not own this device' });
