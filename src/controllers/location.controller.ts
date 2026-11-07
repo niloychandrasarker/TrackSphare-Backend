@@ -210,7 +210,7 @@ export async function getLocationHistory(req: AuthenticatedRequest, res: Respons
       return;
     }
 
-    const { deviceId, from, to, limit = '100', offset = '0' } = req.query;
+    const { deviceId, from, to, limit = '500', offset = '0' } = req.query;
     if (!deviceId) {
       res.status(400).json({ success: false, error: 'deviceId is required' });
       return;

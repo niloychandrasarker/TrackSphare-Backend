@@ -47,6 +47,7 @@ export async function getDevices(req: AuthenticatedRequest, res: Response): Prom
       result = await query(
         `SELECT d.id, d.name, d.model, d.sharing_enabled, d.status, d.last_seen_at, d.battery_level, 
                 COALESCE(d.image_url, u.avatar_url) as image_url,
+                COALESCE(d.user_name, u.name, 'Administrator') as user_name,
                 COALESCE(u.name, 'Administrator') as owner_name, COALESCE(u.email, 'admin@tracksphere.com') as owner_email
          FROM devices d
          LEFT JOIN users u ON u.id = d.user_id
@@ -56,6 +57,7 @@ export async function getDevices(req: AuthenticatedRequest, res: Response): Prom
       result = await query(
         `SELECT d.id, d.name, d.model, d.sharing_enabled, d.status, d.last_seen_at, d.battery_level,
                 COALESCE(d.image_url, u.avatar_url) as image_url,
+                COALESCE(d.user_name, u.name, 'Device Owner') as user_name,
                 COALESCE(u.name, 'Device Owner') as owner_name, COALESCE(u.email, '') as owner_email
          FROM devices d
          LEFT JOIN users u ON u.id = d.user_id
@@ -63,6 +65,7 @@ export async function getDevices(req: AuthenticatedRequest, res: Response): Prom
          UNION
          SELECT d.id, d.name, d.model, d.sharing_enabled, d.status, d.last_seen_at, d.battery_level,
                 COALESCE(d.image_url, u.avatar_url) as image_url,
+                COALESCE(d.user_name, u.name, 'Device Owner') as user_name,
                 COALESCE(u.name, 'Device Owner') as owner_name, COALESCE(u.email, '') as owner_email
          FROM devices d
          LEFT JOIN users u ON u.id = d.user_id
